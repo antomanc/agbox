@@ -12,8 +12,12 @@ All notable changes to this project are documented here. The format follows
   user, hostname, timezone, git identity), then shows the updated plan. Answers are applied
   like `--set` and saved to the config file. Runs with `--yes`, `--dry-run` or without a
   terminal never ask.
+- Hermes Agent gets the shared `AGENTS.md` too: `~/.hermes/SOUL.md` (the one file Hermes
+  loads in every session) gets a managed block pointing at it, and `agbox doctor` checks it.
 
 ### Changed
+- An existing `~/.claude/CLAUDE.md` gets a one-line import of the shared `AGENTS.md` instead
+  of a full copy, so edits to the shared file reach Claude too.
 - The `devtools` line in the plan only lists the GitHub CLI and Playwright when they are
   enabled.
 

@@ -96,6 +96,11 @@ setup() {
   [[ "$output" == *"Projects live in /home/agbox-test-nobody/dev"* ]]
 }
 
+@test "instructions_pointer names the shared AGENTS.md" {
+  run instructions_pointer /home/me/.config/agents/AGENTS.md
+  [[ "$output" == *"are in /home/me/.config/agents/AGENTS.md. Read it before"* ]]
+}
+
 @test "dry-run helpers print instead of executing" {
   AGBOX_DRY_RUN=true
   local marker="$BATS_TEST_TMPDIR/should-not-exist"

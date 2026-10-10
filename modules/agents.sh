@@ -131,6 +131,7 @@ toml_set_top() {
 }
 
 # One instruction file, linked into each agent's global location.
+# Claude imports it when the user already has a CLAUDE.md, so there is still one copy.
 _agents_instructions() {
   local home canonical
   home=$(target_home)
@@ -138,24 +139,36 @@ _agents_instructions() {
   canonical="$home/$AGENTS_MD_REL"
 
   render_agents_md | ensure_block user "$canonical" 0644 '<!--' '-->'
-  if _has_agent claude; then _link_instructions "$home/.claude/CLAUDE.md" "$canonical"; fi
+  if _has_agent claude; then _link_instructions "$home/.claude/CLAUDE.md" "$canonical" "@$canonical"; fi
   if _has_agent codex; then _link_instructions "$home/.codex/AGENTS.md" "$canonical"; fi
   if _has_agent opencode; then _link_instructions "$home/.config/opencode/AGENTS.md" "$canonical"; fi
 }
 
+# _link_instructions LINK CANONICAL [BODY] : symlink LINK to CANONICAL. If the user has their
+# own file there, add a managed block instead: BODY (e.g. an import line), or a full copy.
 _link_instructions() {
-  local link=$1 canonical=$2 current
+  local link=$1 canonical=$2 body=${3:-} current
   if as_root test -L "$link"; then
     current=$(as_root readlink "$link")
     [[ $current == "$canonical" ]] && return 0
   fi
   if as_root test -e "$link" && ! as_root test -L "$link"; then
     # The user has their own file: add our block to it instead of replacing it.
-    render_agents_md | ensure_block user "$link" 0644 '<!--' '-->'
+    if [[ -n $body ]]; then
+      printf '%s\n' "$body" | ensure_block user "$link" 0644 '<!--' '-->'
+    else
+      render_agents_md | ensure_block user "$link" 0644 '<!--' '-->'
+    fi
     return 0
   fi
   run_user mkdir -p "$(dirname "$link")"
   run_user ln -sfn "$canonical" "$link"
+}
+
+# instructions_pointer PATH -> a paragraph for agents that only load a global identity
+# file (Hermes' SOUL.md), sending them to the shared AGENTS.md. Pure, unit-tested.
+instructions_pointer() {
+  printf '%s\n' "This machine's conventions (toolchains, services, ports, where projects live) are in $1. Read it before installing software, starting services, or changing anything outside the current project."
 }
 
 render_agents_md() {

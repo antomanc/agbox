@@ -43,9 +43,25 @@ _services_hermes() {
     log_info "installing Hermes Agent (official install script)"
     run_script user https://hermes-agent.nousresearch.com/install.sh bash
   fi
+  if [[ $AGBOX_AGENT_INSTRUCTIONS == true ]]; then _services_hermes_instructions; fi
   if ! _user_unit_exists 'hermes-gateway.service'; then
     add_next_step "Configure Hermes: run 'hermes' (provider + model), then 'hermes gateway setup' and 'hermes gateway install'"
   fi
+}
+
+# Hermes reads AGENTS.md only from its working directory; the one file it loads in every
+# session is ~/.hermes/SOUL.md, so that gets a pointer to the shared AGENTS.md. Hermes seeds
+# SOUL.md itself (a SOUL.md replaces its default identity), so never create it.
+_services_hermes_instructions() {
+  local home soul
+  home=$(target_home)
+  [[ -n $home ]] || { log_info "would point ~/.hermes/SOUL.md at ~/$AGENTS_MD_REL"; return 0; }
+  soul="$home/.hermes/SOUL.md"
+  if ! as_root test -f "$soul"; then
+    log_skip "no ~/.hermes/SOUL.md yet (re-run after the first 'hermes' run to link AGENTS.md)"
+    return 0
+  fi
+  instructions_pointer "$home/$AGENTS_MD_REL" | ensure_block user "$soul" 0600 '<!--' '-->'
 }
 
 services::check() {
@@ -65,6 +81,9 @@ services::check() {
       check as_user systemctl --user is-active --quiet hermes-gateway.service -- "hermes gateway running" "hermes gateway start"
     else
       check_warn "hermes installed, gateway not set up" "hermes gateway setup && hermes gateway install"
+    fi
+    if user_has hermes && [[ $AGBOX_AGENT_INSTRUCTIONS == true ]]; then
+      check as_root grep -qF "$AGENTS_MD_REL" "$(target_home)/.hermes/SOUL.md" -- "Hermes SOUL.md points at the shared AGENTS.md" "agbox setup --only services"
     fi
   fi
 }

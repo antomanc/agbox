@@ -13,6 +13,8 @@ curl -fsSL https://raw.githubusercontent.com/antomanc/agbox/main/install.sh | ba
 [![CI](https://github.com/antomanc/agbox/actions/workflows/ci.yml/badge.svg)](https://github.com/antomanc/agbox/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+<p align="center"><img src="docs/assets/demo.gif" alt="agbox doctor: every check passing on a mini PC" width="620"></p>
+
 ## Why
 
 Running agents on a headless Linux box usually means a pile of small failures:

@@ -4,7 +4,7 @@
 SYSTEM_PACKAGES=(
   sudo curl ca-certificates gnupg git build-essential pkg-config
   jq ripgrep fd-find tmux unzip zip htop rsync bubblewrap socat
-  lsb-release dnsutils file less nano
+  lsb-release bind9-dnsutils file less nano
 )
 
 system::describe() { echo "base packages, upgrades, hostname, timezone, zram, auto-updates"; }

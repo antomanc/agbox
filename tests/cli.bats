@@ -86,3 +86,15 @@ setup() {
   [ "$(grep -c 'Apply?' <<<"$output")" -eq 2 ]
   ! id agbox-dryrun-user 2>/dev/null
 }
+
+@test "setup works with passwordless sudo when sudo -v would prompt" {
+  [ "$EUID" -ne 0 ] || skip "root never calls sudo"
+  # Fake sudo: NOPASSWD for commands, but -v demands a password (Debian's %sudo rule).
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  printf '#!/bin/sh\n[ "$1" = -v ] && exit 1\n[ "$1" = -n ] && shift\n[ "$1" = -- ] && shift\nexec "$@"\n' \
+    >"$BATS_TEST_TMPDIR/bin/sudo"
+  chmod +x "$BATS_TEST_TMPDIR/bin/sudo"
+  PATH="$BATS_TEST_TMPDIR/bin:$PATH" run "$AGBOX" setup --dry-run --yes --set USER=agbox-dryrun-user --only system
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"sudo authentication failed"* ]]
+}

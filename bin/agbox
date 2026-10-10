@@ -108,8 +108,12 @@ _SUDO_KEEPALIVE_PID=''
 preflight() {
   if ! is_root; then
     has_cmd sudo || die "sudo is not installed: run agbox as root (it will create '$AGBOX_USER' for you)"
-    log_info "agbox needs sudo; you may be asked for your password once"
-    sudo -v || die "sudo authentication failed"
+    # Try non-interactively first: `sudo -v` asks for a password whenever any sudoers
+    # rule needs one (Debian's %sudo does), even if a NOPASSWD rule also matches.
+    if ! sudo -n true 2>/dev/null; then
+      log_info "agbox needs sudo; you may be asked for your password once"
+      sudo -v || die "sudo authentication failed"
+    fi
     # Keep the sudo timestamp fresh for long runs; stops when agbox exits.
     (while kill -0 "$$" 2>/dev/null; do
       sudo -n true 2>/dev/null || true

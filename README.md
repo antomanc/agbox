@@ -137,4 +137,4 @@ Issues and PRs welcome. Adding a module is ~50 lines: see [CONTRIBUTING.md](CONT
 
 ## License
 
-[MIT](LICENSE) © 2026 Antonio Mancuso
+[MIT](LICENSE) © 2026 Antonio Mancini

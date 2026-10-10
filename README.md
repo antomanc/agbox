@@ -61,8 +61,10 @@ walk away. [→ docs/unattended-install.md](docs/unattended-install.md)
 agbox preseed --hostname home-server --ssh-key ~/.ssh/id_ed25519.pub -o preseed.cfg
 ```
 
-agbox shows its plan and asks before changing anything. When it's done, it prints the few
-things only you can do (agent logins, `gh auth login`), then:
+agbox shows its plan and asks before changing anything. Answer `c` to **customize**: a few
+quick questions (profile, agents, permissions, services, components, user, hostname,
+timezone, git identity), then the updated plan. When it's done, it prints the few things only
+you can do (agent logins, `gh auth login`), then:
 
 ```console
 $ agbox doctor
@@ -91,8 +93,9 @@ Useful flags: `--dry-run` (show every command, change nothing), `--only agents,m
 
 ## Configure
 
-Zero config works. Everything is a setting: pass `--set` or edit `/etc/agbox/agbox.conf`
-and re-run.
+Zero config works. For the common choices, answer `c` at the `Apply?` prompt. Everything is a
+setting: pass `--set` or edit `/etc/agbox/agbox.conf` and re-run. Your choices are saved
+there, so the next run starts from them.
 
 ```bash
 agbox setup --set AGENTS="claude opencode" --set SERVICES=t3code --set PLAYWRIGHT=false

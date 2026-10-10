@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `agbox setup` asks `Apply? [Y]es / [n]o / [c]ustomize`. Customize goes through the
+  settings that vary between machines (profile, agents, agent mode, services, components,
+  user, hostname, timezone, git identity), then shows the updated plan. Answers are applied
+  like `--set` and saved to the config file. Runs with `--yes`, `--dry-run` or without a
+  terminal never ask.
+
+### Changed
+- The `devtools` line in the plan only lists the GitHub CLI and Playwright when they are
+  enabled.
+
 ## [0.1.0] - 2026-10-10
 
 ### Added

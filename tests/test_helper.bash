@@ -20,6 +20,8 @@ load_agbox() {
   source "$AGBOX_ROOT/lib/modules.sh"
   # shellcheck source=lib/preseed.sh
   source "$AGBOX_ROOT/lib/preseed.sh"
+  # shellcheck source=lib/wizard.sh
+  source "$AGBOX_ROOT/lib/wizard.sh"
   load_modules
 }
 

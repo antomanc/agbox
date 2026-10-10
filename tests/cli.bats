@@ -64,3 +64,25 @@ setup() {
   AGBOX_OS_RELEASE="$FIXTURES/os-release-fedora" run "$AGBOX" setup --dry-run
   [ "$status" -ne 0 ] && [[ "$output" == *"unsupported distribution"* ]]
 }
+
+@test "setup: answering no aborts before changing anything" {
+  printf 'n\n' >"$BATS_TEST_TMPDIR/answers"
+  AGBOX_TTY="$BATS_TEST_TMPDIR/answers" run "$AGBOX" setup --set USER=agbox-dryrun-user
+  [ "$status" -ne 0 ] && [[ "$output" == *"error: aborted"* ]]
+  ! id agbox-dryrun-user 2>/dev/null
+}
+
+@test "setup: customize updates the plan, then asks again" {
+  # profile, agents (toggle codex off), agent mode, services, components (gh off), user,
+  # hostname, timezone, git name, git email; then decline.
+  printf '%s\n' c vps 2 "" "" "" 4 "" "" "" "" "" "" n >"$BATS_TEST_TMPDIR/answers"
+  AGBOX_TTY="$BATS_TEST_TMPDIR/answers" run "$AGBOX" setup --set USER=agbox-dryrun-user
+  [ "$status" -ne 0 ] && [[ "$output" == *"error: aborted"* ]]
+  [[ "$output" == *"(homelab profile"* && "$output" == *"(vps profile"* ]]
+  [[ "$output" == *'AGENTS="claude"'* && "$output" == *'GH="false"'* ]]
+  [[ "$output" == *"coding agents (claude) in yolo mode"* ]]
+  [[ "$output" == *"✓ firewall"* ]]
+  [[ "$output" == *"devtools   git defaults, Playwright"* ]]
+  [ "$(grep -c 'Apply?' <<<"$output")" -eq 2 ]
+  ! id agbox-dryrun-user 2>/dev/null
+}

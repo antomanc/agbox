@@ -1,7 +1,13 @@
 # shellcheck shell=bash
 # Developer tooling: GitHub CLI, git defaults, Playwright's headless Chromium.
 
-devtools::describe() { echo "GitHub CLI, git defaults, Playwright headless Chromium"; }
+devtools::describe() {
+  local out=''
+  if [[ $AGBOX_GH == true ]]; then out+='GitHub CLI, '; fi
+  out+='git defaults'
+  if [[ $AGBOX_PLAYWRIGHT == true ]]; then out+=', Playwright headless Chromium'; fi
+  echo "$out"
+}
 devtools::enabled() { return 0; } # git defaults always apply; gh/playwright are toggled inside
 
 devtools::apply() {

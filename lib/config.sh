@@ -211,6 +211,10 @@ _validate_words() {
   done
 }
 
+# Pure validators, shared with the setup wizard.
+is_valid_username() { [[ $1 =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; }
+is_valid_hostname() { [[ $1 =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; }
+
 validate_config() {
   local key
   for key in UPGRADE AUTO_UPDATES ZRAM PASSWORDLESS_SUDO FIREWALL TAILSCALE TAILSCALE_SSH \
@@ -222,12 +226,12 @@ validate_config() {
   _validate_words AGENTS "claude codex opencode"
   _validate_words SERVICES "t3code hermes"
   case $AGBOX_AGENT_MODE in yolo | sandboxed) ;; *) die "AGENT_MODE must be yolo or sandboxed" ;; esac
-  [[ $AGBOX_USER =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "invalid USER '$AGBOX_USER'"
+  is_valid_username "$AGBOX_USER" || die "invalid USER '$AGBOX_USER'"
   [[ $AGBOX_USER != root ]] || die "USER must not be root: agents refuse to run unattended as root"
   if ! [[ $AGBOX_ZRAM_PERCENT =~ ^[0-9]+$ ]] || ((AGBOX_ZRAM_PERCENT < 10 || AGBOX_ZRAM_PERCENT > 150)); then
     die "ZRAM_PERCENT must be a number between 10 and 150"
   fi
-  [[ -z $AGBOX_HOSTNAME || $AGBOX_HOSTNAME =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] ||
+  [[ -z $AGBOX_HOSTNAME ]] || is_valid_hostname "$AGBOX_HOSTNAME" ||
     die "invalid HOSTNAME '$AGBOX_HOSTNAME' (lowercase letters, digits and '-')"
   [[ -z $AGBOX_DOCKER_DATA_ROOT || $AGBOX_DOCKER_DATA_ROOT == /* ]] ||
     die "DOCKER_DATA_ROOT must be an absolute path"

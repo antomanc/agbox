@@ -33,16 +33,25 @@ has_cmd() { command -v "$1" >/dev/null 2>&1; }
 is_root() { [[ $EUID -eq 0 ]]; }
 is_dry_run() { [[ ${AGBOX_DRY_RUN:-false} == true ]]; }
 
-# Can we ask the operator a question?
-is_interactive() { [[ ${AGBOX_YES:-false} != true ]] && [[ -r /dev/tty ]] && { : </dev/tty; } 2>/dev/null; }
+# Questions are read from the terminal, even under `curl | bash`. AGBOX_TTY points
+# elsewhere only in tests, which feed answers from a file.
+AGBOX_TTY=${AGBOX_TTY:-/dev/tty}
 
-# confirm "Question?" -> success on yes. Non-interactive runs answer yes.
-confirm() {
-  is_interactive || return 0
-  local reply
-  printf '%s [Y/n] ' "$1" >/dev/tty
-  read -r reply </dev/tty || return 1
-  [[ -z $reply || ${reply,,} == y || ${reply,,} == yes ]]
+# Can we ask the operator a question?
+is_interactive() { [[ ${AGBOX_YES:-false} != true ]] && [[ -r $AGBOX_TTY ]] && { : <"$AGBOX_TTY"; } 2>/dev/null; }
+
+# tty_printf FORMAT ARGS... : print a prompt where the operator sees it.
+tty_printf() {
+  # shellcheck disable=SC2059 # FORMAT is the caller's format string
+  if [[ $AGBOX_TTY == /dev/tty ]]; then printf "$@" >/dev/tty; else printf "$@" >&2; fi
+}
+
+# tty_read VAR : read one answer line. Fails on end of input. The descriptor stays open,
+# so answers fed from a file are consumed in order.
+_TTY_FD=''
+tty_read() {
+  if [[ -z $_TTY_FD ]]; then exec {_TTY_FD}<"$AGBOX_TTY"; fi
+  IFS= read -r "$1" <&"$_TTY_FD"
 }
 
 # Render a command line for display, shell-quoted.

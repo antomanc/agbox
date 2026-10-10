@@ -19,6 +19,8 @@ source "$AGBOX_ROOT/lib/os.sh"
 source "$AGBOX_ROOT/lib/modules.sh"
 # shellcheck source=lib/preseed.sh
 source "$AGBOX_ROOT/lib/preseed.sh"
+# shellcheck source=lib/wizard.sh
+source "$AGBOX_ROOT/lib/wizard.sh"
 
 usage() {
   cat <<EOF
@@ -46,7 +48,7 @@ Options (setup, doctor, config, modules):
   -h, --help            Show this help
 
 Examples:
-  agbox setup                                  # interactive, homelab defaults
+  agbox setup                                  # shows the plan; answer c to customize
   agbox setup --profile vps --set TAILSCALE_AUTHKEY=tskey-...
   agbox setup --only agents --set AGENT_MODE=sandboxed
   agbox doctor
@@ -174,8 +176,17 @@ cmd_setup() {
   print_plan "${SELECTED[@]}"
   if is_dry_run; then
     printf '\n%sDry run: nothing will be changed.%s\n' "$_C_BOLD" "$_C_RESET" >&2
-  elif ! confirm $'\nApply?'; then
-    die "aborted"
+  else
+    ask_apply
+    while [[ $WIZ_ANSWER == customize ]]; do
+      run_wizard
+      # Answers are overrides like --set: reload so profiles and validation apply to them.
+      OPT_SETS+=("${WIZARD_SETS[@]}")
+      init
+      print_plan "${SELECTED[@]}"
+      ask_apply
+    done
+    [[ $WIZ_ANSWER == yes ]] || die "aborted"
   fi
 
   preflight

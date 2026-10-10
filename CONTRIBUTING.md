@@ -27,6 +27,7 @@ lib/config.sh        schema, profiles, config parsing and validation
 lib/os.sh            distro detection, host facts
 lib/modules.sh       module registry and selection
 lib/preseed.sh       `agbox preseed`
+lib/wizard.sh        the Apply?/customize prompt of `agbox setup` (answers become --set overrides)
 modules/*.sh         one file per feature
 docs/                user docs (configuration.md's table is generated)
 tests/*.bats         tests

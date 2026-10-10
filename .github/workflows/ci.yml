@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck --version && make lint
+      - run: make docs-check
+
+  # Unit + CLI tests and a dry-run on every supported distribution, as root (like a fresh VPS).
+  test:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["debian:12", "debian:13", "ubuntu:24.04"]
+    container: ${{ matrix.image }}
+    steps:
+      - run: apt-get update -qq && apt-get install -y -qq bats git ca-certificates curl jq sudo procps >/dev/null
+      - uses: actions/checkout@v4
+      - run: bats tests/
+      - name: dry-run (all modules, vps profile)
+        run: bin/agbox setup --dry-run --yes --profile vps --set SERVICES="t3code hermes" --set AGENTS="claude codex opencode"
+
+  # Real install on a real VM (GitHub's Ubuntu runner has systemd), then doctor, then a
+  # second run that must be a no-op. Tailscale needs an account and Docker conflicts with
+  # the runner's preinstalled engine, so both are off here.
+  e2e:
+    runs-on: ubuntu-24.04
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+      - name: setup
+        run: |
+          sudo bin/agbox setup --yes --set USER=agent --set UPGRADE=false --set TAILSCALE=false \
+            --set DOCKER=false --set GIT_NAME=CI --set GIT_EMAIL=ci@example.com \
+            --set AGENTS="claude codex opencode"
+      - name: doctor
+        run: sudo bin/agbox doctor
+      - name: second run is idempotent
+        run: |
+          sudo bin/agbox setup --yes 2>&1 | tee second-run.log
+          if grep -E '\] write |^  (installing|creating user)' second-run.log; then
+            echo "second run changed things: not idempotent" >&2
+            exit 1
+          fi
+      - name: agents work from a login shell (what agents spawn)
+        run: |
+          sudo -iu agent bash -lc 'node --version && python3 --version && uv --version && claude --version && codex --version'

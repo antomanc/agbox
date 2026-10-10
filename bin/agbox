@@ -1,0 +1,288 @@
+#!/usr/bin/env bash
+# agbox: turn a fresh Debian/Ubuntu machine into a smooth home for AI coding agents.
+# https://github.com/antomanc/agbox — MIT License
+set -Eeuo pipefail
+
+AGBOX_ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
+AGBOX_VERSION=$(cat "$AGBOX_ROOT/VERSION" 2>/dev/null || echo dev)
+AGBOX_REPO=${AGBOX_REPO:-antomanc/agbox}
+AGBOX_SYSTEM_CONFIG=${AGBOX_SYSTEM_CONFIG:-/etc/agbox/agbox.conf}
+export AGBOX_ROOT AGBOX_VERSION
+
+# shellcheck source=lib/core.sh
+source "$AGBOX_ROOT/lib/core.sh"
+# shellcheck source=lib/config.sh
+source "$AGBOX_ROOT/lib/config.sh"
+# shellcheck source=lib/os.sh
+source "$AGBOX_ROOT/lib/os.sh"
+# shellcheck source=lib/modules.sh
+source "$AGBOX_ROOT/lib/modules.sh"
+# shellcheck source=lib/preseed.sh
+source "$AGBOX_ROOT/lib/preseed.sh"
+
+usage() {
+  cat <<EOF
+agbox $AGBOX_VERSION: set up a Debian/Ubuntu machine for AI coding agents
+
+Usage: agbox <command> [options]
+
+Commands:
+  setup       Apply the configuration (idempotent: safe to re-run)
+  doctor      Check that everything works, with a fix for each problem
+  preseed     Generate a Debian preseed.cfg for a hands-off install (agbox preseed --help)
+  config      Print the effective configuration
+  modules     List modules and whether they are enabled
+  update      Update agbox itself to the latest release
+  version     Print the version
+
+Options (setup, doctor, config, modules):
+  -c, --config FILE     Config file (default: $AGBOX_SYSTEM_CONFIG if it exists)
+  -p, --profile NAME    homelab (default) or vps
+  -s, --set KEY=VALUE   Override a setting, e.g. --set AGENTS="claude opencode" (repeatable)
+      --only MODULES    Run only these modules (comma separated)
+      --skip MODULES    Skip these modules (comma separated)
+  -n, --dry-run         Show what would change, change nothing
+  -y, --yes             Don't ask for confirmation (also: no interactive logins)
+  -h, --help            Show this help
+
+Examples:
+  agbox setup                                  # interactive, homelab defaults
+  agbox setup --profile vps --set TAILSCALE_AUTHKEY=tskey-...
+  agbox setup --only agents --set AGENT_MODE=sandboxed
+  agbox doctor
+EOF
+}
+
+# --------------------------------------------------------------- options ----
+
+OPT_CONFIG='' OPT_ONLY='' OPT_SKIP=''
+OPT_SETS=()
+
+parse_common_options() {
+  while (($#)); do
+    case $1 in
+      -c | --config) OPT_CONFIG=${2:?--config needs a file}; shift ;;
+      --config=*) OPT_CONFIG=${1#*=} ;;
+      -p | --profile) OPT_SETS+=("PROFILE=${2:?--profile needs a name}"); shift ;;
+      --profile=*) OPT_SETS+=("PROFILE=${1#*=}") ;;
+      -s | --set) _add_set "${2:?--set needs KEY=VALUE}"; shift ;;
+      --set=*) _add_set "${1#*=}" ;;
+      --only) OPT_ONLY=${2:?--only needs module names}; shift ;;
+      --only=*) OPT_ONLY=${1#*=} ;;
+      --skip) OPT_SKIP=${2:?--skip needs module names}; shift ;;
+      --skip=*) OPT_SKIP=${1#*=} ;;
+      -n | --dry-run) AGBOX_DRY_RUN=true ;;
+      -y | --yes) AGBOX_YES=true ;;
+      -h | --help) usage; exit 0 ;;
+      *) die "unknown option '$1' (see: agbox --help)" ;;
+    esac
+    shift
+  done
+}
+
+_add_set() {
+  local kv=$1
+  [[ $kv == *=* ]] || die "--set expects KEY=VALUE, got '$kv'"
+  local key=${kv%%=*}
+  key=${key#AGBOX_}
+  OPT_SETS+=("${key^^}=${kv#*=}")
+}
+
+init() {
+  AGBOX_DRY_RUN=${AGBOX_DRY_RUN:-false}
+  AGBOX_YES=${AGBOX_YES:-false}
+  export AGBOX_DRY_RUN AGBOX_YES
+  detect_os
+  local config=$OPT_CONFIG
+  if [[ -z $config && -e $AGBOX_SYSTEM_CONFIG ]]; then config=$AGBOX_SYSTEM_CONFIG; fi
+  load_config "$config" "${OPT_SETS[@]}"
+  AGBOX_CONFIG_SOURCE=${config:-defaults}
+}
+
+# ------------------------------------------------------------ preflight ----
+
+_SUDO_KEEPALIVE_PID=''
+
+preflight() {
+  if ! is_root; then
+    has_cmd sudo || die "sudo is not installed: run agbox as root (it will create '$AGBOX_USER' for you)"
+    log_info "agbox needs sudo; you may be asked for your password once"
+    sudo -v || die "sudo authentication failed"
+    # Keep the sudo timestamp fresh for long runs; stops when agbox exits.
+    (while kill -0 "$$" 2>/dev/null; do
+      sudo -n true 2>/dev/null || true
+      sleep 50
+    done) &
+    _SUDO_KEEPALIVE_PID=$!
+  fi
+  has_systemd || log_warn "systemd is not running (container?): services will not be started"
+  os_is_supported || log_warn "$OS_PRETTY is not tested; continuing anyway"
+
+  # One agbox at a time (e.g. first-boot unit vs. a manual run).
+  if has_cmd flock && [[ -w /run/lock ]]; then
+    exec {_lock_fd}>/run/lock/agbox.lock
+    flock -n "$_lock_fd" || die "another agbox run is in progress"
+  fi
+}
+
+cleanup() {
+  if [[ -n $_SUDO_KEEPALIVE_PID ]]; then kill "$_SUDO_KEEPALIVE_PID" 2>/dev/null || true; fi
+}
+trap cleanup EXIT
+
+CURRENT_MODULE=''
+on_error() {
+  local status=$? line=$1 cmd=$2
+  # With `set -E` the trap also fires inside $(...); report once, at the top level.
+  ((BASH_SUBSHELL == 0)) || exit "$status"
+  log_error "${CURRENT_MODULE:+[$CURRENT_MODULE] }command failed (exit $status) at line $line: $cmd"
+  log_error "fix the problem and re-run 'agbox setup${CURRENT_MODULE:+ --only $CURRENT_MODULE}': completed steps are skipped"
+  exit "$status"
+}
+
+# -------------------------------------------------------------- commands ----
+
+print_plan() {
+  local m
+  printf '\n%sagbox %s%s on %s (%s profile, user %s, config: %s)\n' \
+    "$_C_BOLD" "$AGBOX_VERSION" "$_C_RESET" "$OS_PRETTY" "$AGBOX_PROFILE" "$AGBOX_USER" "$AGBOX_CONFIG_SOURCE" >&2
+  for m in "$@"; do
+    if "$m::enabled"; then
+      printf '  %s✓%s %-10s %s\n' "$_C_GREEN" "$_C_RESET" "$m" "$("$m::describe")" >&2
+    else
+      printf '  %s· %-10s disabled%s\n' "$_C_DIM" "$m" "$_C_RESET" >&2
+    fi
+  done
+  if [[ $AGBOX_AGENT_MODE == yolo && -n ${AGBOX_AGENTS// /} ]]; then
+    printf '\n  %sAgents will run without prompts or sandbox: treat this machine as disposable\n  and keep personal credentials off it.%s\n' "$_C_YELLOW" "$_C_RESET" >&2
+  fi
+}
+
+SELECTED=()
+resolve_modules() {
+  local list
+  list=$(select_modules "$OPT_ONLY" "$OPT_SKIP") || exit 1 # die in a subshell: propagate
+  SELECTED=()
+  if [[ -n $list ]]; then mapfile -t SELECTED <<<"$list"; fi
+  ((${#SELECTED[@]})) || die "no modules selected"
+}
+
+cmd_setup() {
+  parse_common_options "$@"
+  init
+  resolve_modules
+  print_plan "${SELECTED[@]}"
+  if is_dry_run; then
+    printf '\n%sDry run: nothing will be changed.%s\n' "$_C_BOLD" "$_C_RESET" >&2
+  elif ! confirm $'\nApply?'; then
+    die "aborted"
+  fi
+
+  preflight
+  trap 'on_error $LINENO "$BASH_COMMAND"' ERR
+  local m
+  for m in "${SELECTED[@]}"; do
+    CURRENT_MODULE=$m
+    log_section "$m"
+    if "$m::enabled"; then
+      "$m::apply"
+    else
+      log_skip "disabled by configuration"
+    fi
+  done
+  CURRENT_MODULE=''
+  trap - ERR
+
+  save_config
+  print_summary
+}
+
+# Persist the effective config (minus secrets) so `agbox doctor` and later runs agree.
+save_config() {
+  is_dry_run && return 0
+  local saved_key=$AGBOX_TAILSCALE_AUTHKEY
+  AGBOX_TAILSCALE_AUTHKEY=''
+  {
+    printf '# agbox configuration. Edit, then re-run: agbox setup\n'
+    printf '# Docs: https://github.com/%s/blob/main/docs/configuration.md\n\n' "$AGBOX_REPO"
+    NO_COLOR=1 _C_DIM='' _C_RESET='' print_config
+  } | write_file root "$AGBOX_SYSTEM_CONFIG" 0600
+  AGBOX_TAILSCALE_AUTHKEY=$saved_key
+}
+
+print_summary() {
+  if is_dry_run; then
+    printf '\n%sDry run complete.%s Run without --dry-run to apply.\n' "$_C_BOLD" "$_C_RESET" >&2
+    return 0
+  fi
+  printf '\n%s%s✓ agbox setup complete%s\n' "$_C_BOLD" "$_C_GREEN" "$_C_RESET" >&2
+  if ((${#NEXT_STEPS[@]})); then
+    printf '\n%sNext steps (as %s):%s\n' "$_C_BOLD" "$AGBOX_USER" "$_C_RESET" >&2
+    local i=1 step
+    for step in "${NEXT_STEPS[@]}"; do
+      printf '  %d. %s\n' "$i" "$step" >&2
+      i=$((i + 1))
+    done
+  fi
+  printf '\nVerify any time with: %sagbox doctor%s\n' "$_C_BOLD" "$_C_RESET" >&2
+}
+
+cmd_doctor() {
+  parse_common_options "$@"
+  init
+  local m
+  resolve_modules
+  printf '%sagbox doctor%s (%s, user %s)\n' "$_C_BOLD" "$_C_RESET" "$OS_PRETTY" "$AGBOX_USER"
+  for m in "${SELECTED[@]}"; do
+    "$m::enabled" || continue
+    printf '\n%s%s%s\n' "$_C_BOLD" "$m" "$_C_RESET"
+    "$m::check"
+  done
+  printf '\n'
+  if ((DOCTOR_FAILS)); then
+    printf '%s%d problem(s)%s, %d warning(s)\n' "$_C_RED" "$DOCTOR_FAILS" "$_C_RESET" "$DOCTOR_WARNS"
+    return 1
+  fi
+  printf '%sAll good%s (%d warning(s))\n' "$_C_GREEN" "$_C_RESET" "$DOCTOR_WARNS"
+}
+
+cmd_config() {
+  parse_common_options "$@"
+  init
+  print_config
+}
+
+cmd_modules() {
+  parse_common_options "$@"
+  init
+  local m state
+  for m in "${MODULES[@]}"; do
+    if "$m::enabled"; then state=on; else state=off; fi
+    printf '%-10s %-4s %s\n' "$m" "$state" "$("$m::describe")"
+  done
+}
+
+cmd_update() {
+  (($# == 0)) || die "update takes no options"
+  log_info "updating agbox from github.com/$AGBOX_REPO"
+  curl -fsSL "https://raw.githubusercontent.com/$AGBOX_REPO/main/install.sh" | AGBOX_NO_SETUP=1 bash
+}
+
+main() {
+  load_modules
+  local cmd=${1:-help}
+  (($#)) && shift
+  case $cmd in
+    setup) cmd_setup "$@" ;;
+    doctor) cmd_doctor "$@" ;;
+    preseed) cmd_preseed "$@" ;;
+    config) cmd_config "$@" ;;
+    modules) cmd_modules "$@" ;;
+    update) cmd_update "$@" ;;
+    version | --version | -V) echo "agbox $AGBOX_VERSION" ;;
+    help | --help | -h) usage ;;
+    *) die "unknown command '$cmd' (see: agbox --help)" ;;
+  esac
+}
+
+main "$@"

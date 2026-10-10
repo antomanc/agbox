@@ -1,0 +1,4 @@
+# Lint config for `make lint` / CI
+shell=bash
+external-sources=true
+source-path=SCRIPTDIR/..

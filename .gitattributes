@@ -1,0 +1,11 @@
+* text=auto eol=lf
+*.sh text eol=lf
+bin/agbox text eol=lf
+
+# Keep the install tarball (git archive / codeload) small: users don't need these.
+/tests export-ignore
+/.github export-ignore
+/scripts export-ignore
+/Makefile export-ignore
+/.shellcheckrc export-ignore
+/AGENTS.md export-ignore

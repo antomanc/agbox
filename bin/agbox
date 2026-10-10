@@ -121,8 +121,11 @@ preflight() {
   os_is_supported || log_warn "$OS_PRETTY is not tested; continuing anyway"
 
   # One agbox at a time (e.g. first-boot unit vs. a manual run).
-  if has_cmd flock && [[ -w /run/lock ]]; then
-    exec {_lock_fd}>/run/lock/agbox.lock
+  # Open read-only: the lock file may belong to another user (root's first-boot
+  # run), and protected_regular forbids O_CREAT on it in the sticky /run/lock.
+  local lock=/run/lock/agbox.lock
+  if has_cmd flock && [[ -w /run/lock ]] && { [[ -e $lock ]] || : >"$lock"; } 2>/dev/null; then
+    exec {_lock_fd}<"$lock"
     flock -n "$_lock_fd" || die "another agbox run is in progress"
   fi
 }

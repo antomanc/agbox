@@ -120,7 +120,7 @@ _mise_check_user() {
     # Service accounts launch tools without reading login shell hooks.
     check user_has "$name" -- "$AGBOX_USER: $name available on agent PATH" "agbox setup --only mise"
   done
-  check grep -q 'mise/shims' "$home/.config/environment.d/10-agbox-path.conf" -- "mise on PATH for systemd user services"
+  check as_user grep -q 'mise/shims' "$home/.config/environment.d/10-agbox-path.conf" -- "$AGBOX_USER: mise on PATH for systemd user services"
 }
 
 # A single lock serializes all account updates, including retries and persistent timers.

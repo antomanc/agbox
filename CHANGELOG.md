@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Extra service accounts via `AGENT_USERS=user[:unit.service]`: per-account mise toolchains,
+  system service PATH drop-ins, shared instructions, Docker membership and doctor checks.
+- Nightly `agbox-tool-updates@` system timers for every mise account, with DNS readiness,
+  failure retries, low priority and serialized upgrades. Doctor warns about legacy user timers.
 - `agbox setup` asks `Apply? [Y]es / [n]o / [c]ustomize`. Customize goes through the
   settings that vary between machines (profile, agents, agent mode, services, components,
   user, hostname, timezone, git identity), then shows the updated plan. Answers are applied
@@ -16,6 +20,9 @@ All notable changes to this project are documented here. The format follows
   loads in every session) gets a managed block pointing at it, and `agbox doctor` checks it.
 
 ### Changed
+- Shared instructions now live at `/etc/agbox/AGENTS.md`, readable by service accounts and
+  editable by the primary user. Existing instructions migrate losslessly with a compatibility
+  symlink; Claude, Codex, opencode and Hermes use links/imports/pointers to the same file.
 - An existing `~/.claude/CLAUDE.md` gets a one-line import of the shared `AGENTS.md` instead
   of a full copy, so edits to the shared file reach Claude too.
 - The `devtools` line in the plan only lists the GitHub CLI and Playwright when they are

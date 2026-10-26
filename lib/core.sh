@@ -98,8 +98,10 @@ as_user() {
   if [[ $(id -u) == "$uid" ]]; then
     (cd "$home" && "${env[@]}" "$@")
   elif is_root; then
+    # shellcheck disable=SC2016 # expand HOME only after switching identity
     runuser -u "$user" -- "${env[@]}" sh -c 'cd "$HOME" || exit; exec "$@"' agbox-user "$@"
   else
+    # shellcheck disable=SC2016 # expand HOME only after switching identity
     sudo -u "$user" -- "${env[@]}" sh -c 'cd "$HOME" || exit; exec "$@"' agbox-user "$@"
   fi
 }

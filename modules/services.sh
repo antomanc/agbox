@@ -61,7 +61,7 @@ _services_hermes_instructions() {
     log_skip "no ~/.hermes/SOUL.md yet (re-run after the first 'hermes' run to link AGENTS.md)"
     return 0
   fi
-  instructions_pointer "$home/$AGENTS_MD_REL" | ensure_block user "$soul" 0600 '<!--' '-->'
+  instructions_pointer "$AGENTS_MD_PATH" | ensure_block user "$soul" 0600 '<!--' '-->'
 }
 
 services::check() {
@@ -83,7 +83,7 @@ services::check() {
       check_warn "hermes installed, gateway not set up" "hermes gateway setup && hermes gateway install"
     fi
     if user_has hermes && [[ $AGBOX_AGENT_INSTRUCTIONS == true ]]; then
-      check as_root grep -qF "$AGENTS_MD_REL" "$(target_home)/.hermes/SOUL.md" -- "Hermes SOUL.md points at the shared AGENTS.md" "agbox setup --only services"
+      check as_root grep -qF "$AGENTS_MD_PATH" "$(target_home)/.hermes/SOUL.md" -- "Hermes SOUL.md points at the shared AGENTS.md" "agbox setup --only services"
     fi
   fi
 }

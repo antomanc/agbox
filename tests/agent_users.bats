@@ -49,3 +49,18 @@ setup() {
   [[ "$output" != *should-not-run* ]]
 }
 
+
+@test "as_user enters private account home after changing identity" {
+  local account_home="$BATS_TEST_TMPDIR/private-home"
+  mkdir -p "$account_home"
+  target_user() { echo service-account; }
+  target_home() { echo "$account_home"; }
+  target_uid() { echo 99999; }
+  is_root() { return 1; }
+  # Simulate a caller unable to cd into the service home. The elevated shell can.
+  cd() { return 1; }
+  sudo() { shift 3; "$@"; }
+  run as_user sh -c 'printf "%s\n%s\n%s\n%s" "$PWD" "$HOME" "$USER" "$1"' _ 'argument with spaces'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$account_home"$'\n'"$account_home"$'\nservice-account\nargument with spaces' ]
+}

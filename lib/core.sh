@@ -98,9 +98,9 @@ as_user() {
   if [[ $(id -u) == "$uid" ]]; then
     (cd "$home" && "${env[@]}" "$@")
   elif is_root; then
-    (cd "$home" && runuser -u "$user" -- "${env[@]}" "$@")
+    runuser -u "$user" -- "${env[@]}" sh -c 'cd "$HOME" || exit; exec "$@"' agbox-user "$@"
   else
-    (cd "$home" && sudo -u "$user" -- "${env[@]}" "$@")
+    sudo -u "$user" -- "${env[@]}" sh -c 'cd "$HOME" || exit; exec "$@"' agbox-user "$@"
   fi
 }
 

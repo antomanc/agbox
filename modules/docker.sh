@@ -26,9 +26,25 @@ Architectures: $OS_ARCH"
 
   _docker_daemon_json
 
-  if ! id -nG "$AGBOX_USER" 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
+  _docker_user_group
+  for_agent_users _docker_user_group
+}
+
+_docker_user_group() {
+  if id -nG "$AGBOX_USER" 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
+    log_skip "$AGBOX_USER already in docker group"
+  else
     run_root usermod -aG docker "$AGBOX_USER"
-    add_next_step "Log out and back in once so '$AGBOX_USER' picks up the docker group"
+    add_next_step "Start a new session for '$AGBOX_USER' to pick up the docker group (restart its service when idle)"
+  fi
+}
+
+_docker_user_check() {
+  check as_user id -nG -- "$AGBOX_USER account accessible" "agbox setup --only docker"
+  if id -nG "$AGBOX_USER" 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
+    check_pass "$AGBOX_USER in docker group"
+  else
+    check_fail "$AGBOX_USER not in docker group" "agbox setup --only docker"
   fi
 }
 
@@ -70,11 +86,8 @@ docker::check() {
   fi
   check as_root docker info -- "docker daemon running" "sudo systemctl start docker"
   check docker compose version -- "docker compose plugin"
-  if id -nG "$AGBOX_USER" | tr ' ' '\n' | grep -qx docker; then
-    check_pass "$AGBOX_USER in docker group"
-  else
-    check_fail "$AGBOX_USER not in docker group" "sudo usermod -aG docker $AGBOX_USER"
-  fi
+  _docker_user_check
+  for_agent_users _docker_user_check
   if [[ -n $AGBOX_DOCKER_DATA_ROOT ]]; then
     local dir
     dir=$(as_root docker info -f '{{.DockerRootDir}}' 2>/dev/null)

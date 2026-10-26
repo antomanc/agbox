@@ -3,11 +3,12 @@
 # AGENTS.md telling every agent what this machine is and how to work on it.
 
 agents::describe() { echo "coding agents ($AGBOX_AGENTS) in $AGBOX_AGENT_MODE mode + shared AGENTS.md"; }
-agents::enabled() { [[ -n ${AGBOX_AGENTS// /} ]]; }
+agents::enabled() { [[ -n ${AGBOX_AGENTS// /}${AGBOX_AGENT_USERS// /} ]]; }
 
 _has_agent() { [[ " $AGBOX_AGENTS " == *" $1 "* ]]; }
 
 AGENTS_MD_REL=.config/agents/AGENTS.md
+AGENTS_MD_PATH=/etc/agbox/AGENTS.md
 
 agents::apply() {
   if _has_agent claude; then _agents_install_claude; fi
@@ -133,36 +134,75 @@ toml_set_top() {
 # One instruction file, linked into each agent's global location.
 # Claude imports it when the user already has a CLAUDE.md, so there is still one copy.
 _agents_instructions() {
-  local home canonical
-  home=$(target_home)
-  [[ -n $home ]] || { log_info "would write ~/$AGENTS_MD_REL"; return 0; }
-  canonical="$home/$AGENTS_MD_REL"
-
-  render_agents_md | ensure_block user "$canonical" 0644 '<!--' '-->'
+  local home legacy canonical=$AGENTS_MD_PATH
+  home=$(user_path '')
+  home=${home%/}
+  legacy="$home/$AGENTS_MD_REL"
+  if ! as_root test -d "$(dirname "$canonical")"; then run_root install -d -m 0755 "$(dirname "$canonical")"; fi
+  if as_root test -f "$legacy" && ! as_root test -L "$legacy"; then
+    if as_root test -e "$canonical"; then
+      as_root cmp -s "$legacy" "$canonical" || die "both $legacy and $canonical exist and differ; merge them before re-running agbox setup --only agents"
+    else
+      log_info "migrating $legacy to $canonical (preserving all user notes)"
+      run_root cp -p -- "$legacy" "$canonical"
+    fi
+    # Only replace the legacy file once its complete contents have been saved.
+    run_user ln -sfn "$canonical" "$legacy"
+  else
+    _link_instructions "$legacy" "$canonical"
+  fi
+  render_agents_md | ensure_block root "$canonical" 0644 '<!--' '-->' --exact
+  if [[ $(as_root stat -c %U "$canonical" 2>/dev/null) != "$AGBOX_USER" ]]; then
+    run_root chown "$AGBOX_USER:" "$canonical"
+  fi
+  if [[ $(as_root stat -c %a "$canonical" 2>/dev/null) != 644 ]]; then
+    run_root chmod 0644 "$canonical"
+  fi
   if _has_agent claude; then _link_instructions "$home/.claude/CLAUDE.md" "$canonical" "@$canonical"; fi
   if _has_agent codex; then _link_instructions "$home/.codex/AGENTS.md" "$canonical"; fi
   if _has_agent opencode; then _link_instructions "$home/.config/opencode/AGENTS.md" "$canonical"; fi
+  for_agent_users _agent_user_instructions
 }
 
-# _link_instructions LINK CANONICAL [BODY] : symlink LINK to CANONICAL. If the user has their
-# own file there, add a managed block instead: BODY (e.g. an import line), or a full copy.
+_agent_user_instructions() {
+  local rel
+  for rel in .claude/CLAUDE.md .codex/AGENTS.md .config/opencode/AGENTS.md; do
+    _link_instructions "$(user_path "$rel")" "$AGENTS_MD_PATH"
+  done
+}
+
+# Existing user files get a pointer, never another copy of the shared instructions.
 _link_instructions() {
-  local link=$1 canonical=$2 body=${3:-} current
+  local link=$1 canonical=$2 body=${3:-} current legacy
+  legacy=$(user_path "$AGENTS_MD_REL")
   if as_root test -L "$link"; then
     current=$(as_root readlink "$link")
     [[ $current == "$canonical" ]] && return 0
-  fi
-  if as_root test -e "$link" && ! as_root test -L "$link"; then
-    # The user has their own file: add our block to it instead of replacing it.
-    if [[ -n $body ]]; then
-      printf '%s\n' "$body" | ensure_block user "$link" 0644 '<!--' '-->'
-    else
-      render_agents_md | ensure_block user "$link" 0644 '<!--' '-->'
+    if [[ $current != "$legacy" ]]; then
+      log_warn "$link points to $current; leaving this user-managed symlink untouched"
+      return 0
     fi
+  elif as_root test -e "$link"; then
+    if [[ -z $body ]]; then body=$(instructions_pointer "$canonical"); fi
+    printf '%s\n' "$body" | ensure_block user "$link" 0644 '<!--' '-->' --exact
     return 0
   fi
   run_user mkdir -p "$(dirname "$link")"
   run_user ln -sfn "$canonical" "$link"
+}
+
+_agent_user_instructions_check() {
+  local rel path
+  check as_user test -r "$AGENTS_MD_PATH" -- "$AGBOX_USER can read $AGENTS_MD_PATH" "agbox setup --only agents"
+  for rel in .claude/CLAUDE.md .codex/AGENTS.md .config/opencode/AGENTS.md; do
+    path=$(user_path "$rel")
+    if [[ $(as_root readlink "$path" 2>/dev/null) == "$AGENTS_MD_PATH" ]] ||
+      { ! as_root test -L "$path" && as_user grep -qF "$AGENTS_MD_PATH" "$path"; }; then
+      check_pass "$AGBOX_USER instructions: $rel"
+    else
+      check_fail "$AGBOX_USER instructions: $rel" "agbox setup --only agents"
+    fi
+  done
 }
 
 # instructions_pointer PATH -> a paragraph for agents that only load a global identity
@@ -172,7 +212,7 @@ instructions_pointer() {
 }
 
 render_agents_md() {
-  local projects sudo_line tools docker_line mode_line
+  local projects sudo_line tools docker_line mode_line entry account accounts='' home
   projects=$(expand_home "$AGBOX_PROJECTS_DIR")
   if [[ $AGBOX_PASSWORDLESS_SUDO == true ]]; then
     sudo_line="- You have passwordless sudo: install system packages with \`sudo apt-get install -y\` when needed."
@@ -189,6 +229,11 @@ render_agents_md() {
   else
     mode_line="- Commands run in a sandbox; ask when you need access outside the workspace."
   fi
+  for entry in ${AGBOX_AGENT_USERS:-}; do
+    account=${entry%%:*}
+    home=$(with_agent_user "$account" '' target_home)
+    accounts+="${accounts:+, }$account (home ${home:-not installed yet})"
+  done
   tools=$AGBOX_MISE_TOOLS
   cat <<EOF
 <!-- Generated by agbox (https://github.com/antomanc/agbox). Edit outside the markers. -->
@@ -210,6 +255,9 @@ $mode_line
 - Commit early and often with clear messages; git history is the undo button.
 - RAM is limited: avoid running several heavy builds or test suites in parallel.
 EOF
+  if [[ -n $accounts ]]; then
+    printf '%s\n' "- Agent accounts on this machine: $accounts. Work in your own workspace; other users' homes are private."
+  fi
 }
 
 agents::check() {
@@ -218,7 +266,8 @@ agents::check() {
     if user_has "$agent"; then check_pass "$agent installed"; else check_fail "$agent installed" "agbox setup --only agents"; fi
   done
   if [[ $AGBOX_AGENT_INSTRUCTIONS == true ]]; then
-    check as_root test -f "$(target_home)/$AGENTS_MD_REL" -- "shared AGENTS.md (~/$AGENTS_MD_REL)"
+    check as_user test -r "$AGENTS_MD_PATH" -- "shared AGENTS.md ($AGENTS_MD_PATH)" "agbox setup --only agents"
+    for_agent_users _agent_user_instructions_check
   fi
   if [[ $AGBOX_AGENT_MODE == sandboxed ]] && apparmor_restricts_userns; then
     check as_user bwrap --ro-bind / / true -- "bubblewrap can create sandboxes (AppArmor ok)" "agbox setup --only agents"

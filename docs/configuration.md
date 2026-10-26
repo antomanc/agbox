@@ -59,6 +59,7 @@ See [`examples/`](../examples) for complete homelab and VPS files.
 | `AGBOX_DOCKER_DATA_ROOT` |  | Move Docker storage, e.g. /home/docker (empty = default) |
 | `AGBOX_MISE_TOOLS` | `node@lts python@3.13 uv pnpm` | Global toolchains installed with mise |
 | `AGBOX_AGENTS` | `claude codex` | Coding agents: claude codex opencode (space separated, empty = none) |
+| `AGBOX_AGENT_USERS` |  | Extra service accounts that run coding agents (space separated user[:system-unit], e.g. openbot:openbot.service). They must already exist. |
 | `AGBOX_AGENT_MODE` | `yolo` | yolo (no prompts, no sandbox: the machine is the sandbox) or sandboxed |
 | `AGBOX_AGENT_INSTRUCTIONS` | `true` | Write global AGENTS.md describing this machine to the agents |
 | `AGBOX_PROJECTS_DIR` | `~/dev` | Where projects live (~ = target user's home) |
@@ -98,3 +99,51 @@ always the canonical one.
 | `devtools` | GitHub CLI, git defaults, Playwright headless Chromium + system libraries |
 | `services` | Optional always-on t3code and Hermes Agent (systemd user services) |
 | `snapshots` | Snapper hourly/daily snapshots of a btrfs root, plus a permanent baseline |
+
+## Extra agent accounts
+
+Apps such as OpenBot create their own service accounts. After installing the app, configure
+its existing account and optional system service:
+
+```bash
+agbox setup --dry-run --yes --set AGENT_USERS="openbot:openbot.service"
+agbox setup --yes --set AGENT_USERS="openbot:openbot.service"
+```
+
+Use space separated `user[:unit.service]` entries for multiple accounts. Root, the primary
+user, duplicate accounts and invalid unit names are rejected. Accounts that do not exist yet
+produce a warning and are skipped; install the app and run setup again.
+
+The `mise` module gives each account its own mise installation and global toolchains. A
+system service gets `/etc/systemd/system/<unit>.d/10-agbox-path.conf`, adding that account's
+`~/.local/bin` and mise shims to PATH even when it never opens a login shell. agbox reloads
+systemd but never restarts the app. **Restart the service when idle** to use the new PATH:
+
+```bash
+sudo systemctl restart openbot.service
+```
+
+The `agents` module maintains one shared `/etc/agbox/AGENTS.md`, readable by every account
+and owned by the primary user so they can edit notes outside the managed markers. Existing
+`~/.config/agents/AGENTS.md` contents migrate there, preserving hand-written notes; the old
+path becomes a compatibility symlink. If both files already exist with different contents,
+setup stops with a merge hint rather than discarding either file. All extra accounts get
+Claude, Codex and opencode instruction links regardless of `AGBOX_AGENTS`; existing user
+files get a managed import or pointer instead of copied instructions. Foreign symlinks are
+left in place with a warning. `AGBOX_AGENT_INSTRUCTIONS=false` disables instruction changes.
+
+When Docker is enabled, its module adds extra accounts to the Docker group. New group
+membership takes effect in a new session or after restarting the app when idle. agbox leaves
+these accounts' sudoers and CLI authentication settings to their app.
+
+The `mise` module also enables `agbox-tool-updates@<user>.timer` for the primary account and
+each existing extra account. Nightly updates run between 03:00 and 04:00 with randomized
+delay, wait for DNS, retry failures, and run at low CPU/I/O priority. A shared lock serializes
+all accounts, and mise upgrades use `--jobs 1`. Toolchains remain per account: shared mise
+installs have backend and Python relocation limitations, and would complicate independent
+updates. See [mise's system install documentation](https://mise.jdx.dev/dev-tools/system-installs.html).
+
+Existing `agent-tool-updates` user timers are kept. Doctor warns about duplicate schedules;
+as the affected account, run `systemctl --user disable --now agent-tool-updates.timer`.
+Use `agbox doctor` to check account toolchains, service PATH, instruction access, Docker
+membership and update timers. Fix hints name the owning module (`mise`, `agents` or `docker`).

@@ -26,6 +26,7 @@ AGBOX_SCHEMA=(
   "DOCKER_DATA_ROOT||Move Docker storage, e.g. /home/docker (empty = default)"
   "MISE_TOOLS|node@lts python@3.13 uv pnpm|Global toolchains installed with mise"
   "AGENTS|claude codex|Coding agents: claude codex opencode (space separated, empty = none)"
+  "AGENT_USERS||Extra service accounts that run coding agents (space separated user[:system-unit], e.g. openbot:openbot.service). They must already exist."
   "AGENT_MODE|yolo|yolo (no prompts, no sandbox: the machine is the sandbox) or sandboxed"
   "AGENT_INSTRUCTIONS|true|Write global AGENTS.md describing this machine to the agents"
   "PROJECTS_DIR|~/dev|Where projects live (~ = target user's home)"
@@ -227,6 +228,14 @@ validate_config() {
   _validate_words SERVICES "t3code hermes"
   case $AGBOX_AGENT_MODE in yolo | sandboxed) ;; *) die "AGENT_MODE must be yolo or sandboxed" ;; esac
   is_valid_username "$AGBOX_USER" || die "invalid USER '$AGBOX_USER'"
+  local entry account seen=' '
+  for entry in $AGBOX_AGENT_USERS; do
+    parse_agent_user "$entry" >/dev/null || die "invalid AGENT_USERS entry '$entry' (expected user[:name.service])"
+    account=${entry%%:*}
+    [[ $account != root && $account != "$AGBOX_USER" ]] || die "AGENT_USERS must not include root or the primary user"
+    [[ $seen != *" $account "* ]] || die "duplicate AGENT_USERS account '$account'"
+    seen+="$account "
+  done
   [[ $AGBOX_USER != root ]] || die "USER must not be root: agents refuse to run unattended as root"
   if ! [[ $AGBOX_ZRAM_PERCENT =~ ^[0-9]+$ ]] || ((AGBOX_ZRAM_PERCENT < 10 || AGBOX_ZRAM_PERCENT > 150)); then
     die "ZRAM_PERCENT must be a number between 10 and 150"
@@ -258,4 +267,15 @@ print_config() {
       printf '%s# %s%s\nAGBOX_%s="%s"\n' "$_C_DIM" "$desc" "$_C_RESET" "$key" "$value"
     fi
   done
+}
+
+# parse_agent_user USER[:UNIT] -> username and optional system unit, one per line.
+parse_agent_user() {
+  local entry=$1 user=${1%%:*} unit=''
+  is_valid_username "$user" || return 1
+  if [[ $entry == *:* ]]; then
+    unit=${entry#*:}
+    [[ $unit =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.@-]*\.service$ && $unit != *..* ]] || return 1
+  fi
+  printf '%s\n%s\n' "$user" "$unit"
 }

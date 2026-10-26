@@ -98,9 +98,11 @@ as_user() {
   if [[ $(id -u) == "$uid" ]]; then
     (cd "$home" && "${env[@]}" "$@")
   elif is_root; then
-    (cd "$home" && runuser -u "$user" -- "${env[@]}" "$@")
+    # shellcheck disable=SC2016 # expand HOME only after switching identity
+    runuser -u "$user" -- "${env[@]}" sh -c 'cd "$HOME" || exit; exec "$@"' agbox-user "$@"
   else
-    (cd "$home" && sudo -u "$user" -- "${env[@]}" "$@")
+    # shellcheck disable=SC2016 # expand HOME only after switching identity
+    sudo -u "$user" -- "${env[@]}" sh -c 'cd "$HOME" || exit; exec "$@"' agbox-user "$@"
   fi
 }
 
@@ -142,25 +144,36 @@ _read_as() {
 
 # ------------------------------------------------------------ file edits ----
 
-# write_file root|user PATH MODE  <<< content
+# write_file root|user PATH MODE [--exact] <<< content
+# --exact preserves all input bytes, including trailing newlines.
 # Atomically writes PATH only if its content differs. Sets FILE_CHANGED=true|false.
 # A symlinked PATH (e.g. a dotfiles-managed ~/.bashrc) is written through, never replaced.
 FILE_CHANGED=false
 write_file() {
   local who=$1 path=$2 mode=$3 content current
-  content=$(cat)
-  current=$(_read_as "$who" "$path") || current=$'\x01missing'
+  if [[ ${4:-} == --exact ]]; then
+    content=$(cat; printf '\001')
+    content=${content%$'\001'}
+    current=$(if _read_as "$who" "$path"; then printf '\001'; else exit 1; fi) || current=$'\001missing\001'
+    current=${current%$'\001'}
+  else
+    content=$(cat)
+    current=$(_read_as "$who" "$path") || current=$'\001missing'
+    content+=$'\n'
+    current+=$'\n'
+  fi
+  # Exact mode preserves the bytes outside managed Markdown blocks.
   if [[ $current == "$content" ]]; then
     FILE_CHANGED=false
     return 0
   fi
   FILE_CHANGED=true
   if is_dry_run; then
-    printf '  %s[%s]%s write %s\n' "$_C_DIM" "$who" "$_C_RESET" "$path" >&2
+    printf '  %s[%s]%s write %s\n' "$_C_DIM" "$(if [[ $who == user ]]; then target_user; else printf root; fi)" "$_C_RESET" "$path" >&2
     return 0
   fi
   # shellcheck disable=SC2016 # expanded by the inner shell
-  printf '%s\n' "$content" | _run_as "$who" sh -c '
+  printf '%s' "$content" | _run_as "$who" sh -c '
     set -e
     dest=$(readlink -f -- "$1" 2>/dev/null) || dest=$1
     mkdir -p "$(dirname "$dest")"
@@ -184,18 +197,27 @@ render_block() {
     printf '%s%s%s' "$before" "$block" "$after"
   elif [[ -z $current ]]; then
     printf '%s' "$block"
+  elif [[ ${5:-} == --exact ]]; then
+    printf '%s\n\n%s' "$current" "$block"
   else
     printf '%s\n\n%s' "${current%$'\n'}" "$block"
   fi
 }
 
-# ensure_block root|user PATH MODE COMMENT [COMMENT_END] <<< body
+# ensure_block root|user PATH MODE COMMENT [COMMENT_END] [--exact] <<< body
+# --exact keeps every byte outside an existing managed block.
 # Keeps a delimited, agbox-owned block inside a file the user may also edit.
 ensure_block() {
   local who=$1 path=$2 mode=$3 comment=$4 suffix=${5:-} body current
   body=$(cat)
+  if [[ ${6:-} == --exact ]]; then
+    current=$(if _read_as "$who" "$path"; then printf '\001'; else exit 1; fi) || current=$'\001'
+    current=${current%$'\001'}
+    write_file "$who" "$path" "$mode" --exact < <(render_block "$current" "$body" "$comment" "$suffix" --exact)
+    return
+  fi
   current=$(_read_as "$who" "$path") || current=''
-  render_block "$current" "$body" "$comment" "$suffix" | write_file "$who" "$path" "$mode"
+  write_file "$who" "$path" "$mode" < <(render_block "$current" "$body" "$comment" "$suffix")
 }
 
 # ------------------------------------------------------------------- apt ----
@@ -253,7 +275,7 @@ apt_add_repo() {
 run_script() {
   local who=$1 url=$2 interpreter=${3:-sh}
   if is_dry_run; then
-    printf '  %s[%s]%s curl -fsSL %s | %s\n' "$_C_DIM" "$who" "$_C_RESET" "$url" "$interpreter" >&2
+    printf '  %s[%s]%s curl -fsSL %s | %s\n' "$_C_DIM" "$(if [[ $who == user ]]; then target_user; else printf root; fi)" "$_C_RESET" "$url" "$interpreter" >&2
     return 0
   fi
   # shellcheck disable=SC2016 # expanded by the inner bash
@@ -322,3 +344,25 @@ user_has() { target_exists && as_user sh -c 'command -v "$1"' _ "$1" >/dev/null 
 
 # mise_user ARGS... : run the target user's mise, non-interactively (dry-run aware).
 mise_user() { run_user env MISE_YES=1 "$(user_path .local/bin/mise)" "$@"; }
+
+# Dynamically scoped overrides keep all existing user primitives usable for service accounts.
+with_agent_user() {
+  # shellcheck disable=SC2034 # dynamically scoped, consumed by module callbacks
+  local AGBOX_USER=$1 AGBOX_AGENT_UNIT=${2:-}
+  shift 2
+  "$@"
+}
+
+# for_agent_users CALLBACK: missing app accounts are expected before their installer runs.
+for_agent_users() {
+  local entry account unit
+  for entry in ${AGBOX_AGENT_USERS:-}; do
+    account=${entry%%:*} unit=''
+    if [[ $entry == *:* ]]; then unit=${entry#*:}; fi
+    if id "$account" >/dev/null 2>&1; then
+      with_agent_user "$account" "$unit" "$@"
+    else
+      log_warn "agent account '$account' does not exist; skipping (install its app, then re-run agbox setup)"
+    fi
+  done
+}

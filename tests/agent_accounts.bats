@@ -198,3 +198,16 @@ SCRIPT
   run _mise_check_timer
   [[ "$output" != *'double updates'* ]]
 }
+
+@test "timer dry-runs show enable commands without systemd and real runs skip them" {
+  has_systemd() { return 1; }
+  as_root() { echo 'unexpected systemd probe' >&2; return 1; }
+  AGBOX_DRY_RUN=true
+  run _mise_enable_timer
+  [ "$status" -eq 0 ]
+  [ "$output" = '  [root] systemctl enable --now agbox-tool-updates@agbox-test-primary.timer' ]
+  AGBOX_DRY_RUN=false
+  run _mise_enable_timer
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}

@@ -28,6 +28,10 @@ All notable changes to this project are documented here. The format follows
 - The `devtools` line in the plan only lists the GitHub CLI and Playwright when they are
   enabled.
 
+### Fixed
+- Dry-runs show planned per-account update timer enable commands even in containers without
+  systemd; real installs still skip enabling timers when systemd is unavailable.
+
 ## [0.1.0] - 2026-10-10
 
 ### Added

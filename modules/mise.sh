@@ -185,8 +185,8 @@ EOF
 
 _mise_enable_timer() {
   local timer="agbox-tool-updates@$AGBOX_USER.timer"
-  if has_systemd; then
-    if as_root systemctl is-enabled --quiet "$timer" && as_root systemctl is-active --quiet "$timer"; then
+  if has_systemd || is_dry_run; then
+    if has_systemd && as_root systemctl is-enabled --quiet "$timer" && as_root systemctl is-active --quiet "$timer"; then
       log_skip "$timer already enabled and active"
     else
       run_root systemctl enable --now "$timer"

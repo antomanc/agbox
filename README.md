@@ -2,6 +2,10 @@
 
 **Turn a fresh Debian/Ubuntu machine into a smooth home for AI coding agents, in one command.**
 
+> **Archived (20 Nov 2026).** This repo stays up as the generic version of agbox and gets no more
+> updates. I now keep my machine setup in a personal, opinionated fork, which is easier than keeping
+> every choice configurable for users who aren't there. Feel free to fork it.
+
 Mini PC in a closet, old laptop, or $5 VPS: agbox sets it up so Claude Code, Codex and
 opencode can install things, run builds, start databases and test web apps **without tripping
 over sandboxes, AppArmor, sudo prompts or missing toolchains**.
